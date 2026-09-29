@@ -20,7 +20,8 @@ Uso:
 
 Entrada: .csv (também aceita .xlsx e .txt com um documento por linha). Aceita documento com
 ou sem pontuação e sem os zeros à esquerda. O separador e a codificação do CSV são detectados
-e mantidos na saída. Se uma coluna de destino já existe, ela é preenchida em vez de duplicada.
+e mantidos na saída. As colunas originais nunca são alteradas: se uma coluna nova tem o mesmo
+nome de uma que já existe (ex.: NUMERO), ela ganha o sufixo _EMPRESA (NUMERO_EMPRESA).
 A cidade do nome do arquivo é o município mais comum entre os CNPJs consultados.
 
 Fonte: https://brasilapi.com.br/api/cnpj/v1/{cnpj} (gratuita, sem chave, dados da Receita
@@ -339,15 +340,13 @@ def main():
     dados.loc[pd.Series(tipo_doc) == "CNPJ INVÁLIDO", "ERRO"] = "dígito verificador inválido"
     ok = pd.Series(cnpjs).notna().to_numpy() & dados["ERRO"].isna().to_numpy()
 
-    # 3. novas colunas
-    for campo, destino in campos:
-        novos = dados[campo].where(dados[campo].notna(), "").astype(str).to_numpy()
-        if destino in df.columns:
-            df.loc[ok, destino] = novos[ok]  # coluna já existe: só troca onde a consulta deu certo
-        else:
-            df[destino] = novos
+    # 3. novas colunas; se o nome já existe na entrada (ex.: NUMERO do imóvel), vira NUMERO_EMPRESA
     erros = dados["ERRO"].notna().to_numpy()
-    for _, destino in campos:
+    originais = set(df.columns)
+    for campo, destino in campos:
+        if destino in originais:
+            destino += "_EMPRESA"
+        df[destino] = dados[campo].where(dados[campo].notna(), "").astype(str).to_numpy()
         df.loc[erros, destino] = "ERRO_CNPJ"
 
     if args.sobrescrever:

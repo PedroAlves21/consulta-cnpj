@@ -57,7 +57,7 @@ python consulta_cnpj.py --colunas-disponiveis
 
 **Entrada:** `.csv` (também aceita `.xlsx` e `.txt` com um documento por linha). Separador (`,` `;` tab) e codificação (UTF-8 ou Latin-1) são detectados e mantidos na saída. O documento pode vir com ou sem pontuação. Se vier sem os zeros à esquerda (planilha que tratou como número), até 11 dígitos conta como CPF quando o dígito verificador de CPF bate; senão, como CNPJ.
 
-**Saída:** por padrão, um novo arquivo `cleandata-<cidade>.csv` (ex.: `cleandata-pinheiro.csv`) na pasta da entrada, com todas as colunas originais, `TIPO_DOC` e as colunas pedidas no fim. Se uma coluna de destino já existe, ela é preenchida em vez de duplicada. Linhas de CNPJ inválido ou que falhou na consulta ficam com `ERRO_CNPJ` em todas as colunas geradas.
+**Saída:** por padrão, um novo arquivo `cleandata-<cidade>.csv` (ex.: `cleandata-pinheiro.csv`) na pasta da entrada, com todas as colunas originais, `TIPO_DOC` e as colunas pedidas no fim. As colunas originais nunca são alteradas: se uma coluna nova tem o mesmo nome de uma que já existe (ex.: `NUMERO`), ela ganha o sufixo `_EMPRESA` (`NUMERO_EMPRESA`). Linhas de CNPJ inválido ou que falhou na consulta ficam com `ERRO_CNPJ` em todas as colunas geradas.
 
 **Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `PORTE_RECEITA`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONES`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`.
 
