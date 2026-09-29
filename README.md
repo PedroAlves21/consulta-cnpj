@@ -1,11 +1,11 @@
 # consulta-cnpj
 
-Lê um CSV com CPFs e CNPJs, identifica o tipo de cada documento, consulta só os CNPJs na [BrasilAPI](https://brasilapi.com.br/docs#tag/CNPJ) (gratuita, sem chave, dados da Receita Federal), um por um, e grava um **novo CSV** com tudo o que o arquivo já tinha mais as informações das empresas.
+Lê um CSV com CPFs e CNPJs, identifica o tipo de cada documento, consulta só os CNPJs na [BrasilAPI](https://brasilapi.com.br/docs#tag/CNPJ) (gratuita, sem chave, dados da Receita Federal), um por um, e grava um **novo CSV**, `cleandata-<cidade>.csv`, com tudo o que o arquivo já tinha mais as informações das empresas.
 
 1. Acha a coluna do documento (nome com `CPF`, `CNPJ` ou `DOC`, ou a indicada em `--coluna-doc`).
 2. Cria a coluna `TIPO_DOC`, logo depois dela: `CPF`, `CNPJ`, `CPF INVÁLIDO`, `CNPJ INVÁLIDO` ou `SEM DOCUMENTO` (pelo tamanho e pelo dígito verificador).
 3. Consulta na API só as linhas `CNPJ`.
-4. Acrescenta as colunas pedidas. Em linhas que não são CNPJ, elas ficam vazias.
+4. Acrescenta as colunas pedidas. Em linhas que não são CNPJ, elas ficam vazias; em CNPJ inválido ou que falhou na consulta, ficam com `ERRO_CNPJ`.
 
 ## Instalação
 
@@ -22,7 +22,7 @@ pip install -r requirements.txt
 Você passa um CSV com uma coluna de CPF/CNPJ, diz quais informações quer e onde gravar:
 
 ```bash
-# colunas padrão: PORTE, NUMERO, NOME_FANTASIA, MATRIZ_FILIAL -> cadastro_cnpj.csv
+# colunas padrão -> cleandata-<cidade>.csv (cidade mais comum entre os CNPJs)
 python consulta_cnpj.py cadastro.csv
 
 # outras colunas
@@ -46,18 +46,20 @@ python consulta_cnpj.py --colunas-disponiveis
 
 | Opção | O que faz |
 |---|---|
-| `-c` | campos a acrescentar, `CAMPO` ou `CAMPO=NOME_DA_COLUNA`, separados por vírgula. Sem `-c`: `PORTE`, `NUMERO`, `NOME_FANTASIA`, `MATRIZ_FILIAL` |
+| `-c` | campos a acrescentar, `CAMPO` ou `CAMPO=NOME_DA_COLUNA`, separados por vírgula. Sem `-c`: `PORTE`, `NUMERO`, `NOME_FANTASIA`, `MATRIZ_FILIAL`, `TELEFONES`, `EMAIL` |
 | `--todas` | acrescenta todos os campos disponíveis |
-| `-o` | arquivo de saída (`.csv` ou `.xlsx`). Padrão: `<entrada>_cnpj.csv`, na mesma pasta |
+| `-o` | arquivo de saída (`.csv` ou `.xlsx`). Padrão: `cleandata-<cidade>.csv`, na pasta da entrada |
+| `--cidade` | cidade do nome do arquivo (padrão: o município mais comum entre os CNPJs consultados) |
+| `--sem-email` | não busca e-mail (é a parte lenta, ver abaixo) |
 | `--sobrescrever` | grava no próprio arquivo de entrada |
 | `--coluna-doc` | nome da coluna com o CPF/CNPJ, se ela não tiver `CPF`, `CNPJ` ou `DOC` no nome |
 | `--atualizar` | ignora o cache e consulta tudo de novo |
 
 **Entrada:** `.csv` (também aceita `.xlsx` e `.txt` com um documento por linha). Separador (`,` `;` tab) e codificação (UTF-8 ou Latin-1) são detectados e mantidos na saída. O documento pode vir com ou sem pontuação. Se vier sem os zeros à esquerda (planilha que tratou como número), até 11 dígitos conta como CPF quando o dígito verificador de CPF bate; senão, como CNPJ.
 
-**Saída:** por padrão, um novo arquivo `<entrada>_cnpj.csv`, com todas as colunas originais, `TIPO_DOC` e as colunas pedidas no fim. Se uma coluna de destino já existe, ela é preenchida em vez de duplicada. CNPJ inválido ou que falhou na consulta tem o motivo na coluna `ERRO_CNPJ`.
+**Saída:** por padrão, um novo arquivo `cleandata-<cidade>.csv` (ex.: `cleandata-pinheiro.csv`) na pasta da entrada, com todas as colunas originais, `TIPO_DOC` e as colunas pedidas no fim. Se uma coluna de destino já existe, ela é preenchida em vez de duplicada. Linhas de CNPJ inválido ou que falhou na consulta ficam com `ERRO_CNPJ` em todas as colunas geradas.
 
-**Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `PORTE_RECEITA`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONE`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`, `ERRO`.
+**Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `PORTE_RECEITA`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONES`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`.
 
 **Porte:** a Receita classifica por faturamento anual em só três faixas, convertidas assim:
 
@@ -69,10 +71,12 @@ python consulta_cnpj.py --colunas-disponiveis
 
 A Receita não separa médio de grande, então `GRANDE` inclui também empresas médias.
 
-**`NUMERO`** é o número do endereço. **`MATRIZ_FILIAL`** é `MATRIZ` ou `FILIAL`.
+**`NUMERO`** é o número do endereço. **`TELEFONES`** traz todos os telefones da empresa separados por vírgula. **`MATRIZ_FILIAL`** é `MATRIZ` ou `FILIAL`.
+
+**`EMAIL`:** a BrasilAPI não informa e-mail, então ele vem da [API aberta da CNPJá](https://cnpja.com/api/open), que aceita só 5 consultas por minuto: cerca de 12 s por CNPJ (500 CNPJs ≈ 1h45). Use `--sem-email` para pular essa etapa.
 
 ## Cache
 
-Cada resposta fica guardada em `~/.cache/consulta_cnpj/cache.jsonl`. Se a execução for interrompida, é só rodar de novo: continua de onde parou e não consulta o mesmo CNPJ duas vezes. Para buscar dados atualizados, use `--atualizar`.
+Cada resposta fica guardada em `~/.cache/consulta_cnpj/` (`cache.jsonl` e `email.jsonl`). Se a execução for interrompida, é só rodar de novo: continua de onde parou e não consulta o mesmo CNPJ duas vezes. Para buscar dados atualizados, use `--atualizar`.
 
 A API limita o número de consultas por minuto; o script faz uma pausa entre elas e, se for bloqueado (HTTP 429), espera e tenta de novo.

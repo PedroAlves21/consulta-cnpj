@@ -5,11 +5,13 @@ Passo a passo:
   2. identifica se cada documento é CPF ou CNPJ (pelo tamanho e pelo dígito verificador) e
      grava isso na coluna TIPO_DOC: CPF, CNPJ, CPF INVÁLIDO, CNPJ INVÁLIDO ou SEM DOCUMENTO;
   3. consulta na API, um por um, só os CNPJs válidos;
-  4. grava um novo CSV com todas as colunas originais + TIPO_DOC + as colunas pedidas
-     (linhas de CPF ficam com essas colunas vazias).
+  4. grava um novo CSV, cleandata-<cidade>.csv na pasta da entrada, com todas as colunas
+     originais + TIPO_DOC + as colunas pedidas. Linhas de CPF ficam com essas colunas vazias;
+     linhas de CNPJ inválido ou que falhou na consulta ficam com "ERRO_CNPJ" nelas.
 
 Uso:
-    python consulta_cnpj.py cadastro.csv                          # -> cadastro_cnpj.csv com as colunas padrão
+    python consulta_cnpj.py cadastro.csv                          # -> cleandata-<cidade>.csv com as colunas padrão
+    python consulta_cnpj.py cadastro.csv --cidade "São Luís"      # -> cleandata-sao-luis.csv
     python consulta_cnpj.py cadastro.csv -c RAZAO_SOCIAL,SITUACAO  # outras colunas
     python consulta_cnpj.py cadastro.csv -c RAZAO_SOCIAL=Empresa   # com o nome de coluna que quiser
     python consulta_cnpj.py cadastro.csv -o saida/resultado.csv    # grava onde quiser
@@ -19,7 +21,7 @@ Uso:
 Entrada: .csv (também aceita .xlsx e .txt com um documento por linha). Aceita documento com
 ou sem pontuação e sem os zeros à esquerda. O separador e a codificação do CSV são detectados
 e mantidos na saída. Se uma coluna de destino já existe, ela é preenchida em vez de duplicada.
-CNPJ que falhar na consulta tem o motivo na coluna ERRO_CNPJ.
+A cidade do nome do arquivo é o município mais comum entre os CNPJs consultados.
 
 Fonte: https://brasilapi.com.br/api/cnpj/v1/{cnpj} (gratuita, sem chave, dados da Receita
 Federal). As respostas ficam em ~/.cache/consulta_cnpj/cache.jsonl, então rodar de novo
@@ -32,6 +34,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -42,14 +45,19 @@ CACHE = os.path.join(os.path.expanduser("~"), ".cache", "consulta_cnpj", "cache.
 PAUSA = 0.5  # segundos entre consultas, pra não levar bloqueio (HTTP 429)
 TENTATIVAS = 5
 
+# A BrasilAPI não devolve e-mail; ele vem da API aberta da CNPJá, que só aceita 5 consultas por minuto.
+URL_EMAIL = "https://open.cnpja.com/office/{}"
+CACHE_EMAIL = os.path.join(os.path.dirname(CACHE), "email.jsonl")
+PAUSA_EMAIL = 12.5
+
 COLUNAS = [
     "CNPJ", "RAZAO_SOCIAL", "NOME_FANTASIA", "SITUACAO", "DATA_SITUACAO", "MATRIZ_FILIAL",
     "DATA_ABERTURA", "CNAE", "CNAE_DESCRICAO",
     "CNAES_SECUNDARIOS", "NATUREZA_JURIDICA", "PORTE", "PORTE_RECEITA", "CAPITAL_SOCIAL", "SIMPLES",
-    "MEI", "LOGRADOURO", "NUMERO", "COMPLEMENTO", "BAIRRO", "CEP", "MUNICIPIO", "UF", "TELEFONE",
-    "EMAIL", "QTD_SOCIOS", "SOCIOS", "ERRO",
+    "MEI", "LOGRADOURO", "NUMERO", "COMPLEMENTO", "BAIRRO", "CEP", "MUNICIPIO", "UF", "TELEFONES",
+    "EMAIL", "QTD_SOCIOS", "SOCIOS",
 ]
-PADRAO = ["PORTE", "NUMERO", "NOME_FANTASIA", "MATRIZ_FILIAL"]  # colunas quando -c não é informado
+PADRAO = ["PORTE", "NUMERO", "NOME_FANTASIA", "MATRIZ_FILIAL", "TELEFONES", "EMAIL"]  # colunas quando -c não é informado
 
 # A Receita só tem 3 faixas de porte (por faturamento anual): micro (inclui MEI, até R$ 360 mil),
 # pequeno porte (até R$ 4,8 mi) e "demais" (acima disso). Aqui viram pequeno/médio/grande.
@@ -110,6 +118,16 @@ def consulta(cnpj):
     return {"erro": "sem resposta da API"}
 
 
+def formata_telefone(numero):
+    """'9832140000' -> '(98) 3214-0000'; celular com 9 dígitos -> '(98) 99999-0000'."""
+    digitos = re.sub(r"\D", "", numero or "")
+    if len(digitos) < 10:
+        return digitos or None
+    ddd, resto = digitos[:2], digitos[2:]
+    numero = f"{resto[:-4]}-{resto[-4:]}"
+    return numero if ddd == "00" else f"({ddd}) {numero}"  # 00 = sem DDD (4004-xxxx, 0800)
+
+
 def extrai(cnpj, d):
     """Achata a resposta nas colunas de COLUNAS."""
     if "erro" in d:
@@ -139,19 +157,53 @@ def extrai(cnpj, d):
         "CEP": d.get("cep"),
         "MUNICIPIO": d.get("municipio"),
         "UF": d.get("uf"),
-        "TELEFONE": d.get("ddd_telefone_1") or d.get("ddd_telefone_2"),
-        "EMAIL": d.get("email"),
+        "TELEFONES": ", ".join(filter(None, map(formata_telefone, [d.get("ddd_telefone_1"), d.get("ddd_telefone_2")]))) or None,
+        "EMAIL": None,  # preenchido em consulta_todos, via CNPJá
         "QTD_SOCIOS": len(socios),
         "SOCIOS": " | ".join(s["nome_socio"] for s in socios),
         "ERRO": None,
     }
 
 
-def carrega_cache():
-    if not os.path.exists(CACHE):
+def consulta_email(cnpj):
+    """E-mails do CNPJ na CNPJá (lista, pode ser vazia), ou None se a API não respondeu."""
+    req = urllib.request.Request(URL_EMAIL.format(cnpj), headers={"User-Agent": "consulta-cnpj"})
+    for tentativa in range(10):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return [e["address"].lower() for e in json.load(resp).get("emails") or []]
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 404):
+                return []
+            espera = 60 if e.code == 429 else 2 ** tentativa
+        except (urllib.error.URLError, TimeoutError):
+            espera = 2 ** tentativa
+        time.sleep(espera)
+    return None
+
+
+def carrega_cache(caminho=CACHE):
+    if not os.path.exists(caminho):
         return {}
-    with open(CACHE, encoding="utf-8") as f:
+    with open(caminho, encoding="utf-8") as f:
         return {r["cnpj"]: r["dados"] for r in map(json.loads, f)}
+
+
+def busca_emails(cnpjs, atualizar):
+    cache = carrega_cache(CACHE_EMAIL)
+    faltam = list(dict.fromkeys(c for c in cnpjs if atualizar or c not in cache))
+    if faltam:
+        print(f"e-mails: {len(faltam)} CNPJs para consultar na CNPJá (~{len(faltam) * PAUSA_EMAIL / 60:.0f} min)", file=sys.stderr)
+    with open(CACHE_EMAIL, "a", encoding="utf-8") as f:
+        for i, cnpj in enumerate(faltam, 1):
+            emails = consulta_email(cnpj)
+            if emails is not None:  # sem resposta não vai pro cache, pra tentar de novo na próxima vez
+                cache[cnpj] = emails
+                f.write(json.dumps({"cnpj": cnpj, "dados": emails}) + "\n")
+                f.flush()
+            print(f"[e-mail {i}/{len(faltam)}] {cnpj} {', '.join(emails or []) or '-'}", file=sys.stderr)
+            time.sleep(PAUSA_EMAIL)
+    return cache
 
 
 def busca(cnpjs, cache, atualizar):
@@ -169,11 +221,16 @@ def busca(cnpjs, cache, atualizar):
             time.sleep(PAUSA)
 
 
-def consulta_todos(cnpjs, atualizar=False):
+def consulta_todos(cnpjs, atualizar=False, emails=False):
     """Consulta os CNPJs (já validados) e devolve {cnpj: linha com as colunas de COLUNAS}."""
     cache = carrega_cache()
     busca(cnpjs, cache, atualizar)
-    return {c: extrai(c, cache[c]) for c in cnpjs}
+    linhas = {c: extrai(c, cache[c]) for c in cnpjs}
+    if emails:
+        achados = busca_emails([c for c in linhas if not linhas[c]["ERRO"]], atualizar)
+        for c, linha in linhas.items():
+            linha["EMAIL"] = ", ".join(achados.get(c) or []) or None
+    return linhas
 
 
 def le_entrada(caminho):
@@ -200,6 +257,12 @@ def le_entrada(caminho):
     return df, sep, encoding
 
 
+def slug(texto):
+    """'São Luís' -> 'sao-luis'."""
+    texto = unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", texto).strip("-")
+
+
 def le_colunas(texto):
     """'RAZAO_SOCIAL=Empresa,UF' -> [('RAZAO_SOCIAL', 'Empresa'), ('UF', 'UF')]."""
     pares = []
@@ -214,9 +277,11 @@ def main():
     ap.add_argument("entrada", nargs="*", help="arquivo .csv/.xlsx/.txt, ou os próprios documentos")
     ap.add_argument("-c", "--colunas", help=f"CAMPO ou CAMPO=NOME_DA_COLUNA, separados por vírgula (padrão: {','.join(PADRAO)})")
     ap.add_argument("--todas", action="store_true", help="acrescenta todos os campos disponíveis")
-    ap.add_argument("-o", "--saida", help="onde gravar (.csv ou .xlsx); padrão: <entrada>_cnpj.<ext>")
+    ap.add_argument("-o", "--saida", help="onde gravar (.csv ou .xlsx); padrão: cleandata-<cidade>.csv na pasta da entrada")
+    ap.add_argument("--cidade", help="cidade usada no nome do arquivo (padrão: a mais comum entre os CNPJs)")
     ap.add_argument("--sobrescrever", action="store_true", help="grava no próprio arquivo de entrada")
     ap.add_argument("--coluna-doc", "--coluna-cnpj", help="coluna com o CPF/CNPJ (padrão: a que tem CPF, CNPJ ou DOC no nome)")
+    ap.add_argument("--sem-email", action="store_true", help="não busca e-mail (a busca é lenta: 5 CNPJs por minuto)")
     ap.add_argument("--atualizar", action="store_true", help="ignora o cache e consulta tudo de novo")
     ap.add_argument("--colunas-disponiveis", action="store_true", help="lista os campos e sai")
     args = ap.parse_args()
@@ -230,17 +295,20 @@ def main():
         ap.error("use -o ou --sobrescrever, não os dois")
 
     if args.todas:
-        campos = [(c, c) for c in COLUNAS if c not in ("CNPJ", "ERRO")]
+        campos = [(c, c) for c in COLUNAS if c != "CNPJ"]
     else:
         campos = le_colunas(args.colunas) if args.colunas else [(c, c) for c in PADRAO]
     invalidos = [c for c, _ in campos if c not in COLUNAS]
     if invalidos:
         ap.error(f"campos inexistentes: {', '.join(invalidos)} (veja --colunas-disponiveis)")
+    if args.sem_email:
+        campos = [(c, d) for c, d in campos if c != "EMAIL"]
+    emails = any(c == "EMAIL" for c, _ in campos)
 
     # documentos direto na linha de comando: resultado na tela
     if not os.path.isfile(args.entrada[0]):
         tipos = [tipo_documento(v) for v in args.entrada]
-        resultado = consulta_todos([d for t, d in tipos if t == "CNPJ"], args.atualizar)
+        resultado = consulta_todos([d for t, d in tipos if t == "CNPJ"], args.atualizar, emails)
         for tipo, doc in tipos:
             print(f"\n{tipo:>18}: {doc}")
             for campo, destino in campos + [("ERRO", "ERRO")] if tipo == "CNPJ" else []:
@@ -266,8 +334,8 @@ def main():
 
     # 2. consulta só os CNPJs válidos
     cnpjs = [d if t == "CNPJ" else None for t, d in tipos]
-    resultado = consulta_todos([c for c in cnpjs if c], args.atualizar)
-    dados = pd.DataFrame([resultado[c] if c else {} for c in cnpjs], columns=COLUNAS, dtype=object)
+    resultado = consulta_todos([c for c in cnpjs if c], args.atualizar, emails)
+    dados = pd.DataFrame([resultado[c] if c else {} for c in cnpjs], columns=COLUNAS + ["ERRO"], dtype=object)
     dados.loc[pd.Series(tipo_doc) == "CNPJ INVÁLIDO", "ERRO"] = "dígito verificador inválido"
     ok = pd.Series(cnpjs).notna().to_numpy() & dados["ERRO"].isna().to_numpy()
 
@@ -278,15 +346,15 @@ def main():
             df.loc[ok, destino] = novos[ok]  # coluna já existe: só troca onde a consulta deu certo
         else:
             df[destino] = novos
-    erros = dados["ERRO"].notna()
-    if erros.any():
-        df["ERRO_CNPJ"] = dados["ERRO"].fillna("").to_numpy()
+    erros = dados["ERRO"].notna().to_numpy()
+    for _, destino in campos:
+        df.loc[erros, destino] = "ERRO_CNPJ"
 
     if args.sobrescrever:
         destino_arquivo = entrada
     else:
-        base, ext = os.path.splitext(entrada)
-        destino_arquivo = args.saida or f"{base}_cnpj{'.csv' if ext.lower() == '.txt' else ext}"
+        cidade = args.cidade or dados.loc[ok, "MUNICIPIO"].mode().get(0) or os.path.splitext(os.path.basename(entrada))[0]
+        destino_arquivo = args.saida or os.path.join(os.path.dirname(entrada), f"cleandata-{slug(cidade)}.csv")
     pasta = os.path.dirname(destino_arquivo)
     if pasta:
         os.makedirs(pasta, exist_ok=True)
