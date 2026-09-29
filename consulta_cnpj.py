@@ -1,20 +1,25 @@
-"""Lê um CSV com CNPJs, consulta cada um na BrasilAPI e grava as colunas pedidas.
+"""Lê um CSV com CPFs e CNPJs, consulta os CNPJs na BrasilAPI e grava um novo CSV com os dados.
+
+Passo a passo:
+  1. lê o CSV e acha a coluna do documento (nome com "CPF", "CNPJ" ou "DOC", ou --coluna-doc);
+  2. identifica se cada documento é CPF ou CNPJ (pelo tamanho e pelo dígito verificador) e
+     grava isso na coluna TIPO_DOC: CPF, CNPJ, CPF INVÁLIDO, CNPJ INVÁLIDO ou SEM DOCUMENTO;
+  3. consulta na API, um por um, só os CNPJs válidos;
+  4. grava um novo CSV com todas as colunas originais + TIPO_DOC + as colunas pedidas
+     (linhas de CPF ficam com essas colunas vazias).
 
 Uso:
-    python consulta_cnpj.py empresas.csv -c RAZAO_SOCIAL,SITUACAO          # -> empresas_cnpj.csv
-    python consulta_cnpj.py empresas.csv -c RAZAO_SOCIAL=Empresa,UF=Estado  # com o nome de coluna que quiser
-    python consulta_cnpj.py empresas.csv -c SITUACAO -o saida/resultado.csv # grava onde quiser
-    python consulta_cnpj.py empresas.csv -c SITUACAO --sobrescrever         # grava no próprio empresas.csv
-    python consulta_cnpj.py 00.000.000/0001-91 11222333000181              # CNPJs direto, resultado na tela
+    python consulta_cnpj.py cadastro.csv                          # -> cadastro_cnpj.csv com as colunas padrão
+    python consulta_cnpj.py cadastro.csv -c RAZAO_SOCIAL,SITUACAO  # outras colunas
+    python consulta_cnpj.py cadastro.csv -c RAZAO_SOCIAL=Empresa   # com o nome de coluna que quiser
+    python consulta_cnpj.py cadastro.csv -o saida/resultado.csv    # grava onde quiser
+    python consulta_cnpj.py 00.000.000/0001-91 11222333000181     # documentos direto, resultado na tela
     python consulta_cnpj.py --colunas-disponiveis
 
-Entrada: .csv (também aceita .xlsx e .txt com um CNPJ por linha). Usa a coluna cujo nome
-contém "CNPJ" (ou a indicada em --coluna-cnpj). Aceita CNPJ com ou sem pontuação e sem os
-zeros à esquerda. O separador e a codificação do CSV são detectados e mantidos na saída.
-
-Saída: o mesmo arquivo com as colunas pedidas acrescentadas no fim (sem -c, todas). Se uma
-coluna de destino já existe, ela é preenchida em vez de duplicada. Linhas cujo CNPJ falhou
-ficam com o valor que já tinham, e o motivo vai para a coluna ERRO_CNPJ.
+Entrada: .csv (também aceita .xlsx e .txt com um documento por linha). Aceita documento com
+ou sem pontuação e sem os zeros à esquerda. O separador e a codificação do CSV são detectados
+e mantidos na saída. Se uma coluna de destino já existe, ela é preenchida em vez de duplicada.
+CNPJ que falhar na consulta tem o motivo na coluna ERRO_CNPJ.
 
 Fonte: https://brasilapi.com.br/api/cnpj/v1/{cnpj} (gratuita, sem chave, dados da Receita
 Federal). As respostas ficam em ~/.cache/consulta_cnpj/cache.jsonl, então rodar de novo
@@ -51,9 +56,38 @@ PADRAO = ["PORTE", "NUMERO", "NOME_FANTASIA", "MATRIZ_FILIAL"]  # colunas quando
 PORTE_CLASSE = {1: "PEQUENO", 3: "MÉDIO", 5: "GRANDE"}
 
 
-def limpa_cnpj(valor):
+def dv_ok(doc, pesos1):
+    """Confere os 2 dígitos verificadores (mesma conta para CPF e CNPJ, muda só o peso)."""
+    base = doc[:-2]
+    for pesos in (pesos1, [pesos1[0] + 1] + pesos1):
+        resto = sum(int(d) * p for d, p in zip(base, pesos)) % 11
+        base += str(0 if resto < 2 else 11 - resto)
+    return base == doc and len(set(doc)) > 1  # 111.111.111-11 etc. passam na conta mas não valem
+
+
+PESOS_CPF = [10, 9, 8, 7, 6, 5, 4, 3, 2]
+PESOS_CNPJ = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+
+
+def tipo_documento(valor):
+    """Devolve (TIPO_DOC, documento só com dígitos e zeros à esquerda).
+
+    Até 11 dígitos é CPF, a menos que só faça sentido como CNPJ que perdeu os zeros à esquerda
+    (planilha que tratou o número como número); 12 a 14 dígitos é CNPJ.
+    """
     digitos = re.sub(r"\D", "", str(valor))
-    return digitos.zfill(14) if 0 < len(digitos) <= 14 else None
+    if not digitos:
+        return "SEM DOCUMENTO", None
+    if len(digitos) <= 11:
+        if dv_ok(digitos.zfill(11), PESOS_CPF):
+            return "CPF", digitos.zfill(11)
+        if dv_ok(digitos.zfill(14), PESOS_CNPJ):
+            return "CNPJ", digitos.zfill(14)
+        return "CPF INVÁLIDO", digitos.zfill(11)
+    if len(digitos) <= 14:
+        cnpj = digitos.zfill(14)
+        return ("CNPJ" if dv_ok(cnpj, PESOS_CNPJ) else "CNPJ INVÁLIDO"), cnpj
+    return "CNPJ INVÁLIDO", digitos
 
 
 def consulta(cnpj):
@@ -136,9 +170,10 @@ def busca(cnpjs, cache, atualizar):
 
 
 def consulta_todos(cnpjs, atualizar=False):
+    """Consulta os CNPJs (já validados) e devolve {cnpj: linha com as colunas de COLUNAS}."""
     cache = carrega_cache()
     busca(cnpjs, cache, atualizar)
-    return {c: extrai(c, cache[c]) if c else {"ERRO": "CNPJ vazio/ilegível"} for c in cnpjs}
+    return {c: extrai(c, cache[c]) for c in cnpjs}
 
 
 def le_entrada(caminho):
@@ -156,7 +191,7 @@ def le_entrada(caminho):
     if ext == ".txt":
         with open(caminho, encoding=encoding) as f:
             linhas = [l.strip() for l in f if l.strip()]
-        return pd.DataFrame({"CNPJ": linhas}), ",", encoding
+        return pd.DataFrame({"CPF/CNPJ": linhas}), ",", encoding
     try:
         sep = csv.Sniffer().sniff(amostra, delimiters=",;\t|").delimiter
     except csv.Error:
@@ -175,13 +210,13 @@ def le_colunas(texto):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Consulta CNPJs na BrasilAPI e grava as colunas pedidas.")
-    ap.add_argument("entrada", nargs="*", help="arquivo .csv/.xlsx/.txt com CNPJs, ou os próprios CNPJs")
+    ap = argparse.ArgumentParser(description="Identifica CPF/CNPJ, consulta os CNPJs na BrasilAPI e grava um novo CSV.")
+    ap.add_argument("entrada", nargs="*", help="arquivo .csv/.xlsx/.txt, ou os próprios documentos")
     ap.add_argument("-c", "--colunas", help=f"CAMPO ou CAMPO=NOME_DA_COLUNA, separados por vírgula (padrão: {','.join(PADRAO)})")
     ap.add_argument("--todas", action="store_true", help="acrescenta todos os campos disponíveis")
     ap.add_argument("-o", "--saida", help="onde gravar (.csv ou .xlsx); padrão: <entrada>_cnpj.<ext>")
     ap.add_argument("--sobrescrever", action="store_true", help="grava no próprio arquivo de entrada")
-    ap.add_argument("--coluna-cnpj", help="nome da coluna com o CNPJ (padrão: a que tem 'CNPJ' no nome)")
+    ap.add_argument("--coluna-doc", "--coluna-cnpj", help="coluna com o CPF/CNPJ (padrão: a que tem CPF, CNPJ ou DOC no nome)")
     ap.add_argument("--atualizar", action="store_true", help="ignora o cache e consulta tudo de novo")
     ap.add_argument("--colunas-disponiveis", action="store_true", help="lista os campos e sai")
     args = ap.parse_args()
@@ -190,7 +225,7 @@ def main():
         print("\n".join(COLUNAS))
         return
     if not args.entrada:
-        ap.error("informe um arquivo com CNPJs ou os CNPJs")
+        ap.error("informe um arquivo ou os documentos")
     if args.sobrescrever and args.saida:
         ap.error("use -o ou --sobrescrever, não os dois")
 
@@ -202,34 +237,49 @@ def main():
     if invalidos:
         ap.error(f"campos inexistentes: {', '.join(invalidos)} (veja --colunas-disponiveis)")
 
-    # CNPJs direto na linha de comando: resultado na tela
+    # documentos direto na linha de comando: resultado na tela
     if not os.path.isfile(args.entrada[0]):
-        resultado = consulta_todos([limpa_cnpj(c) for c in args.entrada], args.atualizar)
-        for cnpj, dados in resultado.items():
-            print(f"\n{'CNPJ':>18}: {cnpj}")
-            for campo, destino in campos + [("ERRO", "ERRO")]:
-                if dados.get(campo) not in (None, ""):
-                    print(f"{destino:>18}: {dados[campo]}")
+        tipos = [tipo_documento(v) for v in args.entrada]
+        resultado = consulta_todos([d for t, d in tipos if t == "CNPJ"], args.atualizar)
+        for tipo, doc in tipos:
+            print(f"\n{tipo:>18}: {doc}")
+            for campo, destino in campos + [("ERRO", "ERRO")] if tipo == "CNPJ" else []:
+                if resultado[doc].get(campo) not in (None, ""):
+                    print(f"{destino:>18}: {resultado[doc][campo]}")
         return
 
     entrada = args.entrada[0]
     df, sep, encoding = le_entrada(entrada)
-    col_cnpj = args.coluna_cnpj or next((c for c in df.columns if "CNPJ" in str(c).upper()), None)
-    if col_cnpj not in df.columns:
-        ap.error(f"coluna de CNPJ não encontrada; colunas do arquivo: {', '.join(map(str, df.columns))} (use --coluna-cnpj)")
+    col_doc = args.coluna_doc or next(
+        (c for c in df.columns if any(k in str(c).upper() for k in ("CNPJ", "CPF", "DOC"))), None)
+    if col_doc not in df.columns:
+        ap.error(f"coluna do documento não encontrada; colunas do arquivo: {', '.join(map(str, df.columns))} (use --coluna-doc)")
 
-    cnpjs = [limpa_cnpj(v) for v in df[col_cnpj]]
-    resultado = consulta_todos(cnpjs, args.atualizar)
-    dados = pd.DataFrame([resultado[c] for c in cnpjs], columns=COLUNAS, dtype=object)
-    ok = dados["ERRO"].isna().to_numpy()
+    # 1. CPF ou CNPJ
+    tipos = [tipo_documento(v) for v in df[col_doc]]
+    tipo_doc = [t for t, _ in tipos]
+    if "TIPO_DOC" in df.columns:
+        df["TIPO_DOC"] = tipo_doc
+    else:
+        df.insert(df.columns.get_loc(col_doc) + 1, "TIPO_DOC", tipo_doc)
+    print(pd.Series(tipo_doc).value_counts().to_string(), file=sys.stderr)
 
+    # 2. consulta só os CNPJs válidos
+    cnpjs = [d if t == "CNPJ" else None for t, d in tipos]
+    resultado = consulta_todos([c for c in cnpjs if c], args.atualizar)
+    dados = pd.DataFrame([resultado[c] if c else {} for c in cnpjs], columns=COLUNAS, dtype=object)
+    dados.loc[pd.Series(tipo_doc) == "CNPJ INVÁLIDO", "ERRO"] = "dígito verificador inválido"
+    ok = pd.Series(cnpjs).notna().to_numpy() & dados["ERRO"].isna().to_numpy()
+
+    # 3. novas colunas
     for campo, destino in campos:
         novos = dados[campo].where(dados[campo].notna(), "").astype(str).to_numpy()
         if destino in df.columns:
             df.loc[ok, destino] = novos[ok]  # coluna já existe: só troca onde a consulta deu certo
         else:
             df[destino] = novos
-    if not ok.all():
+    erros = dados["ERRO"].notna()
+    if erros.any():
         df["ERRO_CNPJ"] = dados["ERRO"].fillna("").to_numpy()
 
     if args.sobrescrever:
@@ -244,7 +294,7 @@ def main():
         df.to_excel(destino_arquivo, index=False)
     else:
         df.to_csv(destino_arquivo, index=False, sep=sep or ",", encoding=encoding or "utf-8-sig")
-    print(f"\nsalvo em {destino_arquivo} ({len(df)} linhas, {(~ok).sum()} com erro)", file=sys.stderr)
+    print(f"\nsalvo em {destino_arquivo} ({len(df)} linhas, {ok.sum()} CNPJs consultados, {erros.sum()} com erro)", file=sys.stderr)
 
 
 if __name__ == "__main__":
