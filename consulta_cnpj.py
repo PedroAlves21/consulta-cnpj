@@ -39,10 +39,16 @@ TENTATIVAS = 5
 
 COLUNAS = [
     "CNPJ", "RAZAO_SOCIAL", "NOME_FANTASIA", "SITUACAO", "DATA_SITUACAO", "MATRIZ_FILIAL",
-    "DATA_ABERTURA", "CNAE", "CNAE_DESCRICAO", "CNAES_SECUNDARIOS", "NATUREZA_JURIDICA", "PORTE",
-    "CAPITAL_SOCIAL", "SIMPLES", "MEI", "LOGRADOURO", "NUMERO", "COMPLEMENTO", "BAIRRO", "CEP",
-    "MUNICIPIO", "UF", "TELEFONE", "EMAIL", "QTD_SOCIOS", "SOCIOS", "ERRO",
+    "DATA_ABERTURA", "CNAE", "CNAE_DESCRICAO",
+    "CNAES_SECUNDARIOS", "NATUREZA_JURIDICA", "PORTE", "PORTE_RECEITA", "CAPITAL_SOCIAL", "SIMPLES",
+    "MEI", "LOGRADOURO", "NUMERO", "COMPLEMENTO", "BAIRRO", "CEP", "MUNICIPIO", "UF", "TELEFONE",
+    "EMAIL", "QTD_SOCIOS", "SOCIOS", "ERRO",
 ]
+PADRAO = ["PORTE", "NUMERO", "NOME_FANTASIA", "MATRIZ_FILIAL"]  # colunas quando -c não é informado
+
+# A Receita só tem 3 faixas de porte (por faturamento anual): micro (inclui MEI, até R$ 360 mil),
+# pequeno porte (até R$ 4,8 mi) e "demais" (acima disso). Aqui viram pequeno/médio/grande.
+PORTE_CLASSE = {1: "PEQUENO", 3: "MÉDIO", 5: "GRANDE"}
 
 
 def limpa_cnpj(valor):
@@ -87,7 +93,8 @@ def extrai(cnpj, d):
         "CNAE_DESCRICAO": d.get("cnae_fiscal_descricao"),
         "CNAES_SECUNDARIOS": ", ".join(str(c["codigo"]) for c in d.get("cnaes_secundarios") or [] if c.get("codigo")),
         "NATUREZA_JURIDICA": d.get("natureza_juridica"),
-        "PORTE": d.get("porte"),
+        "PORTE": PORTE_CLASSE.get(d.get("codigo_porte"), "NÃO INFORMADO"),
+        "PORTE_RECEITA": d.get("porte"),
         "CAPITAL_SOCIAL": d.get("capital_social"),
         "SIMPLES": "SIM" if d.get("opcao_pelo_simples") else "NAO",
         "MEI": "SIM" if d.get("opcao_pelo_mei") else "NAO",
@@ -113,10 +120,10 @@ def carrega_cache():
         return {r["cnpj"]: r["dados"] for r in map(json.loads, f)}
 
 
-def consulta_todos(cnpjs, atualizar=False):
-    cache = {} if atualizar else carrega_cache()
-    faltam = list(dict.fromkeys(c for c in cnpjs if c and c not in cache))
-    print(f"{len(set(cnpjs))} CNPJs, {len(faltam)} para consultar", file=sys.stderr)
+def busca(cnpjs, cache, atualizar):
+    """Consulta na API os CNPJs que ainda não estão no cache (ou todos, com atualizar)."""
+    faltam = list(dict.fromkeys(c for c in cnpjs if c and (atualizar or c not in cache)))
+    print(f"{len(set(filter(None, cnpjs)))} CNPJs, {len(faltam)} para consultar", file=sys.stderr)
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     with open(CACHE, "a", encoding="utf-8") as f:
         for i, cnpj in enumerate(faltam, 1):
@@ -126,6 +133,11 @@ def consulta_todos(cnpjs, atualizar=False):
             f.flush()
             print(f"[{i}/{len(faltam)}] {cnpj} {dados.get('razao_social') or dados.get('erro')}", file=sys.stderr)
             time.sleep(PAUSA)
+
+
+def consulta_todos(cnpjs, atualizar=False):
+    cache = carrega_cache()
+    busca(cnpjs, cache, atualizar)
     return {c: extrai(c, cache[c]) if c else {"ERRO": "CNPJ vazio/ilegível"} for c in cnpjs}
 
 
@@ -165,7 +177,8 @@ def le_colunas(texto):
 def main():
     ap = argparse.ArgumentParser(description="Consulta CNPJs na BrasilAPI e grava as colunas pedidas.")
     ap.add_argument("entrada", nargs="*", help="arquivo .csv/.xlsx/.txt com CNPJs, ou os próprios CNPJs")
-    ap.add_argument("-c", "--colunas", help="CAMPO ou CAMPO=NOME_DA_COLUNA, separados por vírgula (padrão: todos)")
+    ap.add_argument("-c", "--colunas", help=f"CAMPO ou CAMPO=NOME_DA_COLUNA, separados por vírgula (padrão: {','.join(PADRAO)})")
+    ap.add_argument("--todas", action="store_true", help="acrescenta todos os campos disponíveis")
     ap.add_argument("-o", "--saida", help="onde gravar (.csv ou .xlsx); padrão: <entrada>_cnpj.<ext>")
     ap.add_argument("--sobrescrever", action="store_true", help="grava no próprio arquivo de entrada")
     ap.add_argument("--coluna-cnpj", help="nome da coluna com o CNPJ (padrão: a que tem 'CNPJ' no nome)")
@@ -181,7 +194,10 @@ def main():
     if args.sobrescrever and args.saida:
         ap.error("use -o ou --sobrescrever, não os dois")
 
-    campos = le_colunas(args.colunas) if args.colunas else [(c, c) for c in COLUNAS if c not in ("CNPJ", "ERRO")]
+    if args.todas:
+        campos = [(c, c) for c in COLUNAS if c not in ("CNPJ", "ERRO")]
+    else:
+        campos = le_colunas(args.colunas) if args.colunas else [(c, c) for c in PADRAO]
     invalidos = [c for c, _ in campos if c not in COLUNAS]
     if invalidos:
         ap.error(f"campos inexistentes: {', '.join(invalidos)} (veja --colunas-disponiveis)")

@@ -17,7 +17,10 @@ pip install -r requirements.txt
 Você passa um CSV com uma coluna de CNPJ, diz quais informações quer e onde gravar:
 
 ```bash
-# acrescenta razão social e situação -> empresas_cnpj.csv
+# colunas padrão: PORTE, NUMERO, NOME_FANTASIA, MATRIZ_FILIAL -> empresas_cnpj.csv
+python consulta_cnpj.py empresas.csv
+
+# outras colunas
 python consulta_cnpj.py empresas.csv -c RAZAO_SOCIAL,SITUACAO
 
 # escolhe o nome de cada coluna: CAMPO=NOME
@@ -38,7 +41,8 @@ python consulta_cnpj.py --colunas-disponiveis
 
 | Opção | O que faz |
 |---|---|
-| `-c` | campos a acrescentar, `CAMPO` ou `CAMPO=NOME_DA_COLUNA`, separados por vírgula. Sem `-c`, acrescenta todos |
+| `-c` | campos a acrescentar, `CAMPO` ou `CAMPO=NOME_DA_COLUNA`, separados por vírgula. Sem `-c`: `PORTE`, `NUMERO`, `NOME_FANTASIA`, `MATRIZ_FILIAL` |
+| `--todas` | acrescenta todos os campos disponíveis |
 | `-o` | arquivo de saída (`.csv` ou `.xlsx`). Padrão: `<entrada>_cnpj.csv`, na mesma pasta |
 | `--sobrescrever` | grava no próprio arquivo de entrada |
 | `--coluna-cnpj` | nome da coluna com o CNPJ, se ela não tiver "CNPJ" no nome |
@@ -48,7 +52,19 @@ python consulta_cnpj.py --colunas-disponiveis
 
 **Saída:** o mesmo arquivo, com as colunas pedidas acrescentadas no fim. Se uma coluna de destino já existe no CSV, ela é preenchida em vez de duplicada, e as linhas cujo CNPJ falhou mantêm o valor que já tinham. Se algum CNPJ for inválido, não encontrado ou estiver vazio, o motivo aparece na coluna `ERRO_CNPJ`.
 
-**Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONE`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`, `ERRO`.
+**Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `PORTE_RECEITA`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONE`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`, `ERRO`.
+
+**Porte:** a Receita classifica por faturamento anual em só três faixas, convertidas assim:
+
+| Receita (`PORTE_RECEITA`) | `PORTE` |
+|---|---|
+| Micro empresa (inclui MEI; até R$ 360 mil) | PEQUENO |
+| Empresa de pequeno porte (até R$ 4,8 mi) | MÉDIO |
+| Demais (acima de R$ 4,8 mi) | GRANDE |
+
+A Receita não separa médio de grande, então `GRANDE` inclui também empresas médias.
+
+**`NUMERO`** é o número do endereço. **`MATRIZ_FILIAL`** é `MATRIZ` ou `FILIAL`.
 
 ## Cache
 
