@@ -1,0 +1,15 @@
+# Ambiente
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+
+# Listas de entrada e resultados (ficam só locais)
+*.xlsx
+*.xls
+*.csv
+*.txt
+!requirements.txt
