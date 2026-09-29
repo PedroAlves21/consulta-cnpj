@@ -54,15 +54,11 @@ PAUSA_EMAIL = 12.5
 COLUNAS = [
     "CNPJ", "RAZAO_SOCIAL", "NOME_FANTASIA", "SITUACAO", "DATA_SITUACAO", "MATRIZ_FILIAL",
     "DATA_ABERTURA", "CNAE", "CNAE_DESCRICAO",
-    "CNAES_SECUNDARIOS", "NATUREZA_JURIDICA", "PORTE", "PORTE_RECEITA", "CAPITAL_SOCIAL", "SIMPLES",
+    "CNAES_SECUNDARIOS", "NATUREZA_JURIDICA", "PORTE", "CAPITAL_SOCIAL", "SIMPLES",
     "MEI", "LOGRADOURO", "NUMERO", "COMPLEMENTO", "BAIRRO", "CEP", "MUNICIPIO", "UF", "TELEFONES",
     "EMAIL", "QTD_SOCIOS", "SOCIOS",
 ]
 PADRAO = ["PORTE", "NUMERO", "NOME_FANTASIA", "MATRIZ_FILIAL", "TELEFONES", "EMAIL"]  # colunas quando -c não é informado
-
-# A Receita só tem 3 faixas de porte (por faturamento anual): micro (inclui MEI, até R$ 360 mil),
-# pequeno porte (até R$ 4,8 mi) e "demais" (acima disso). Aqui viram pequeno/médio/grande.
-PORTE_CLASSE = {1: "PEQUENO", 3: "MÉDIO", 5: "GRANDE"}
 
 
 def dv_ok(doc, pesos1):
@@ -146,8 +142,7 @@ def extrai(cnpj, d):
         "CNAE_DESCRICAO": d.get("cnae_fiscal_descricao"),
         "CNAES_SECUNDARIOS": ", ".join(str(c["codigo"]) for c in d.get("cnaes_secundarios") or [] if c.get("codigo")),
         "NATUREZA_JURIDICA": d.get("natureza_juridica"),
-        "PORTE": PORTE_CLASSE.get(d.get("codigo_porte"), "NÃO INFORMADO"),
-        "PORTE_RECEITA": d.get("porte"),
+        "PORTE": d.get("porte"),
         "CAPITAL_SOCIAL": d.get("capital_social"),
         "SIMPLES": "SIM" if d.get("opcao_pelo_simples") else "NAO",
         "MEI": "SIM" if d.get("opcao_pelo_mei") else "NAO",

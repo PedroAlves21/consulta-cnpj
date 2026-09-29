@@ -59,17 +59,9 @@ python consulta_cnpj.py --colunas-disponiveis
 
 **Saída:** por padrão, um novo arquivo `cleandata-<cidade>.csv` (ex.: `cleandata-pinheiro.csv`) na pasta da entrada, com todas as colunas originais, `TIPO_DOC` e as colunas pedidas no fim. As colunas originais nunca são alteradas: se uma coluna nova tem o mesmo nome de uma que já existe (ex.: `NUMERO`), ela ganha o sufixo `_EMPRESA` (`NUMERO_EMPRESA`). Linhas de CNPJ inválido ou que falhou na consulta ficam com `ERRO_CNPJ` em todas as colunas geradas.
 
-**Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `PORTE_RECEITA`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONES`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`.
+**Campos disponíveis:** `CNPJ`, `RAZAO_SOCIAL`, `NOME_FANTASIA`, `SITUACAO`, `DATA_SITUACAO`, `MATRIZ_FILIAL`, `DATA_ABERTURA`, `CNAE`, `CNAE_DESCRICAO`, `CNAES_SECUNDARIOS`, `NATUREZA_JURIDICA`, `PORTE`, `CAPITAL_SOCIAL`, `SIMPLES`, `MEI`, `LOGRADOURO`, `NUMERO`, `COMPLEMENTO`, `BAIRRO`, `CEP`, `MUNICIPIO`, `UF`, `TELEFONES`, `EMAIL`, `QTD_SOCIOS`, `SOCIOS`.
 
-**Porte:** a Receita classifica por faturamento anual em só três faixas, convertidas assim:
-
-| Receita (`PORTE_RECEITA`) | `PORTE` |
-|---|---|
-| Micro empresa (inclui MEI; até R$ 360 mil) | PEQUENO |
-| Empresa de pequeno porte (até R$ 4,8 mi) | MÉDIO |
-| Demais (acima de R$ 4,8 mi) | GRANDE |
-
-A Receita não separa médio de grande, então `GRANDE` inclui também empresas médias.
+**`PORTE`:** como vem da Receita Federal, que classifica pelo faturamento anual: `MICRO EMPRESA` (inclui MEI; até R$ 360 mil), `EMPRESA DE PEQUENO PORTE` (até R$ 4,8 mi) ou `DEMAIS` (acima disso).
 
 **`NUMERO`** é o número do endereço. **`TELEFONES`** traz todos os telefones da empresa separados por vírgula. **`MATRIZ_FILIAL`** é `MATRIZ` ou `FILIAL`.
 
