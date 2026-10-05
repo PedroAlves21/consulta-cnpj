@@ -2,6 +2,9 @@
 
 Lê um CSV com CPFs e CNPJs, identifica o tipo de cada documento, consulta só os CNPJs na [BrasilAPI](https://brasilapi.com.br/docs#tag/CNPJ) (gratuita, sem chave, dados da Receita Federal), um por um, e grava um **novo CSV**, `cleandata-<cidade>.csv`, com tudo o que o arquivo já tinha mais as informações das empresas.
 
+
+> **Sobre este projeto:** este script foi desenvolvido para um trabalho de análise de cadastro municipal, em que era preciso enriquecer uma lista de contribuintes com os dados públicos das empresas na Receita Federal. Ficou genérico o bastante para servir a qualquer lista de CNPJs, por isso está publicado aqui. Nenhum dado do trabalho original faz parte do repositório: as listas de entrada e os resultados ficam só na máquina de quem usa (ver `.gitignore`).
+
 1. Acha a coluna do documento (nome com `CPF`, `CNPJ` ou `DOC`, ou a indicada em `--coluna-doc`).
 2. Cria a coluna `TIPO_DOC`, logo depois dela: `CPF`, `CNPJ`, `CPF INVÁLIDO`, `CNPJ INVÁLIDO` ou `SEM DOCUMENTO` (pelo tamanho e pelo dígito verificador).
 3. Consulta na API só as linhas `CNPJ`.
@@ -29,7 +32,7 @@ As APIs são online, então dá para usar sem baixar nada na máquina:
 ## Instalação
 
 ```bash
-git clone <url-do-repo> consulta-cnpj
+git clone https://github.com/PedroAlves21/consulta-cnpj.git
 cd consulta-cnpj
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -239,3 +242,11 @@ fetch('https://brasilapi.com.br/api/cnpj/v1/00000000000191')
 Cada resposta fica guardada em `~/.cache/consulta_cnpj/` (`cache.jsonl` e `email.jsonl`). Se a execução for interrompida, é só rodar de novo: continua de onde parou e não consulta o mesmo CNPJ duas vezes. Para buscar dados atualizados, use `--atualizar`.
 
 A API limita o número de consultas por minuto; o script faz uma pausa entre elas e, se for bloqueado (HTTP 429), espera e tenta de novo.
+
+## Dados pessoais (LGPD)
+
+O script só consulta dados públicos de **CNPJ** (Receita Federal). CPFs são apenas classificados (`TIPO_DOC`), nunca enviados a nenhuma API. Ainda assim, as listas de entrada e os CSVs gerados podem conter dados pessoais (nomes de sócios, telefones, e-mails): não os versione nem publique. O `.gitignore` já ignora `*.csv`, `*.xlsx` e `*.txt`.
+
+## Licença
+
+[MIT](LICENSE) — use, modifique e distribua à vontade, mantendo o aviso de copyright.
